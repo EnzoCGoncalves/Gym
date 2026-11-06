@@ -8,6 +8,11 @@ PASTA = Path(__file__).parent
 CAMINHO_DB = Path(os.environ.get("ESPORTFIT_DB", PASTA / "esportfit.db"))
 CATALOGO = PASTA / "catalogo" / "exercicios.json"
 
+# No Render o disco é apagado a cada reinício: lá o banco fica no Turso (SQLite na nuvem).
+# Sem essas variáveis (no seu PC), usa o arquivo esportfit.db normalmente.
+TURSO_URL = os.environ.get("TURSO_DATABASE_URL", "").strip()
+TURSO_TOKEN = os.environ.get("TURSO_AUTH_TOKEN", "").strip()
+
 ESQUEMA = """
 CREATE TABLE IF NOT EXISTS usuarios (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -81,6 +86,10 @@ COLUNAS_NOVAS_EXERCICIOS = {
 
 
 def conectar() -> sqlite3.Connection:
+    if TURSO_URL:
+        from turso import Conexao
+
+        return Conexao(TURSO_URL, TURSO_TOKEN)
     con = sqlite3.connect(CAMINHO_DB, check_same_thread=False)
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA foreign_keys = ON")
@@ -125,11 +134,10 @@ def sincronizar_catalogo(con: sqlite3.Connection) -> int:
     catalogo = json.load(open(CATALOGO, encoding="utf-8"))
 
     # Bancos da versão 1: os 22 exercícios iniciais não tinham código -> liga pelo nome
-    for e in catalogo:
-        if not e["traducao_automatica"]:
-            con.execute(
-                "UPDATE exercicios SET codigo = ? WHERE codigo IS NULL AND nome = ?", (e["codigo"], e["nome"])
-            )
+    con.executemany(
+        "UPDATE exercicios SET codigo = ? WHERE codigo IS NULL AND nome = ?",
+        [(e["codigo"], e["nome"]) for e in catalogo if not e["traducao_automatica"]],
+    )
 
     con.executemany(
         """INSERT INTO exercicios
